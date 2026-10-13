@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="法语跟读">
+<title>法语跟读</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: one reading column; a sticky transport bar above the text, setup controls on top */
+  :root{
+    --bg:#f6f7fb; --surface:#ffffff; --fg:#1d2233; --muted:#5d6479; --line:#dde1ec;
+    --accent:#2d4fb8; --accent-fg:#ffffff; --hl:#e3e9ff; --hl-line:#2d4fb8; --done:#8a90a3;
+    --read:"Literata", Georgia, "Times New Roman", serif;
+    --ui:"IBM Plex Sans", system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+    --bg:#13161f; --surface:#1b1f2b; --fg:#e7e9f0; --muted:#9aa1b5; --line:#2c3242;
+    --accent:#7f9bff; --accent-fg:#0f1220; --hl:#26304d; --hl-line:#7f9bff; --done:#6f7689; color-scheme:dark}}
+  :root[data-theme="dark"]{
+    --bg:#13161f; --surface:#1b1f2b; --fg:#e7e9f0; --muted:#9aa1b5; --line:#2c3242;
+    --accent:#7f9bff; --accent-fg:#0f1220; --hl:#26304d; --hl-line:#7f9bff; --done:#6f7689; color-scheme:dark}
+  body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.55 var(--ui)}
+  .wrap{max-width:760px;margin:0 auto;padding-inline:16px;padding-block:20px 48px;display:grid;gap:14px}
+  h1{font:600 1.5rem/1.2 var(--read);margin:0;text-wrap:balance}
+  h1 small{display:block;font:400 .85rem var(--ui);color:var(--muted);margin-top:4px}
+  textarea{width:100%;box-sizing:border-box;min-height:110px;padding:10px 12px;border:1px solid var(--line);border-radius:8px;
+    background:var(--surface);color:var(--fg);font:1rem/1.5 var(--read);resize:vertical}
+  .row{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:center}
+  label{display:flex;gap:6px;align-items:center;color:var(--muted);font-size:.9rem;min-width:0}
+  select,button{font:inherit;color:var(--fg);background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:7px 10px;max-width:100%}
+  select{min-width:0}
+  #voice{max-width:min(320px,70vw)}
+  button{cursor:pointer}
+  button:focus-visible,select:focus-visible,textarea:focus-visible,.s:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+  .bar{position:sticky;top:env(safe-area-inset-top,0px);z-index:2;background:var(--bg);padding-block:8px;border-bottom:1px solid var(--line)}
+  .bar button{min-width:44px}
+  #status{margin-left:auto;font-size:.85rem;color:var(--muted);font-variant-numeric:tabular-nums}
+  #hint{font-size:.85rem;color:var(--muted);margin:0}
+  #hint.warn{color:var(--fg);background:var(--hl);padding:8px 10px;border-radius:8px}
+  #reader{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;font:1.2rem/1.75 var(--read)}
+  #reader p{margin:0 0 .9em}
+  #reader p:last-child{margin-bottom:0}
+  .s{cursor:pointer;border-radius:3px;padding:1px 0;transition:background .2s}
+  .s.cur{background:var(--hl);box-shadow:inset 0 -2px 0 var(--hl-line)}
+  .s.done{color:var(--done)}
+  .gap-on #status::after{content:" · 请跟读"}
+  @media (prefers-reduced-motion:reduce){.s{transition:none}}
+  #mine{height:36px;max-width:100%}
+  [hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>法语跟读<small>连续朗读整段，句间留出停顿让你跟着说</small></h1>
+
+  <textarea id="text" aria-label="法语文本">Bonjour, je m'appelle Marie. J'habite à Paris depuis trois ans, dans un petit appartement près du canal Saint-Martin.
+
+Le matin, je prends un café en terrasse avant d'aller au travail. Le week-end, j'aime me promener le long de la Seine et flâner chez les bouquinistes. Et toi, qu'est-ce que tu fais le dimanche ?</textarea>
+
+  <div class="row">
+    <button class="primary" id="load">载入文本</button>
+    <label>语音 <select id="voice"></select></label>
+  </div>
+  <div class="row">
+    <label>语速 <select id="rate"><option>0.6</option><option>0.75</option><option selected>0.9</option><option>1</option><option>1.2</option></select></label>
+    <label>句间停顿 <select id="gap">
+      <option value="0">不停顿（连续朗读）</option>
+      <option value="1" selected>1× 句长</option>
+      <option value="1.5">1.5× 句长</option>
+      <option value="2">2× 句长</option>
+    </select></label>
+    <label><input type="checkbox" id="loop"> 单句循环</label>
+  </div>
+  <p id="hint"></p>
+
+  <div class="bar row">
+    <button id="prev" aria-label="上一句">⏮</button>
+    <button class="primary" id="play">▶ 播放</button>
+    <button id="next" aria-label="下一句">⏭</button>
+    <button id="rec">🎙 录我的跟读</button>
+    <audio id="mine" controls hidden></audio>
+    <span id="status"></span>
+  </div>
+  <div id="reader"></div>
+  <p id="tip" style="margin:0;font-size:.85rem;color:var(--muted)">点任意句子从那里开始读；双击单词单独听发音。录音后可回放和原声对比。</p>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const store = { get: (k) => { try { return localStorage.getItem(k); } catch { return null; } },
+                set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
+const synth = window.speechSynthesis;
+let voices = [], sentences = [], spans = [], cur = 0, playing = false, token = 0, utt = null;
+
+function rank(v) {
+  const id = v.name + ' ' + v.voiceURI;   // Safari 增强/高级语音的标识在 voiceURI 里
+  if (/premium|enhanced|natural|neural/i.test(id)) return 0;
+  if (/google|online/i.test(id)) return 1;
+  return 2;
+}
+function loadVoices() {
+  if (!synth) { setHint('这个浏览器不支持语音朗读，请用 Chrome 或 Safari 打开。', true); return; }
+  voices = synth.getVoices().filter((v) => /^fr/i.test(v.lang))
+    .sort((a, b) => rank(a) - rank(b) || a.lang.localeCompare(b.lang));
+  const sel = $('#voice'), saved = store.get('voice');
+  sel.innerHTML = '';
+  voices.forEach((v, i) => {
+    const o = new Option(`${rank(v) === 0 ? '★ ' : ''}${v.name} (${v.lang})`, i);
+    o.selected = v.name === saved; sel.add(o);
+  });
+  if (!voices.length) {
+    setHint('还没找到法语语音。Chrome：联网时会出现「Google français」。iPhone / Mac：设置 → 辅助功能 → 朗读内容 → 声音 → 法语，下载 Audrey 或 Thomas 的增强版，然后刷新本页。', true);
+  } else if (!voices.some((v) => rank(v) < 2)) {
+    setHint('当前只有基础法语语音。iPhone / Mac 可在 设置 → 辅助功能 → 朗读内容 → 声音 里下载法语「增强版」，音质更自然。');
+  } else setHint('');
+}
+function setHint(t, warn) { const h = $('#hint'); h.textContent = t; h.className = warn ? 'warn' : ''; h.hidden = !t; }
+if (synth) { synth.onvoiceschanged = loadVoices; }
+loadVoices(); setTimeout(loadVoices, 800);
+$('#voice').onchange = () => store.set('voice', voices[$('#voice').value]?.name);
+
+function say(text, rate = +$('#rate').value) {
+  return new Promise((resolve) => {
+    if (!synth) return resolve();
+    utt = new SpeechSynthesisUtterance(text);   // 保留引用，避免 Chrome 丢失结束回调
+    const v = voices[$('#voice').value];
+    if (v) utt.voice = v;
+    utt.lang = v?.lang || 'fr-FR'; utt.rate = rate;
+    utt.onend = utt.onerror = () => resolve();
+    synth.speak(utt);
+  });
+}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function load() {
+  stop();
+  const paras = $('#text').value.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+  const reader = $('#reader'); reader.innerHTML = ''; sentences = []; spans = [];
+  for (const p of paras) {
+    const el = document.createElement('p');
+    for (const s of p.match(/[^.!?…]+[.!?…]+["»”)]*|[^.!?…]+$/g) || []) {
+      const span = document.createElement('span');
+      span.className = 's'; span.tabIndex = 0; span.dataset.i = sentences.length;
+      for (const part of s.trim().split(/([\p{L}'’-]+)/u)) {
+        if (!part) continue;
+        if (/\p{L}/u.test(part)) { const w = document.createElement('span'); w.className = 'w'; w.textContent = part; span.append(w); }
+        else span.append(part);
+      }
+      el.append(span, ' '); sentences.push(s.trim()); spans.push(span);
+    }
+    reader.append(el);
+  }
+  cur = 0; mark();
+}
+function mark(scroll) {
+  spans.forEach((s, i) => { s.classList.toggle('cur', i === cur); s.classList.toggle('done', i < cur); });
+  if (scroll) spans[cur]?.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+  $('#status').textContent = sentences.length ? `第 ${cur + 1} / ${sentences.length} 句` : '';
+}
+async function run() {
+  const my = ++token; playing = true; $('#play').textContent = '⏸ 暂停';
+  while (my === token && cur < sentences.length) {
+    mark(true);
+    const t0 = performance.now();
+    await say(sentences[cur]);
+    if (my !== token) return;
+    const gap = +$('#gap').value;
+    if (gap) {
+      document.body.classList.add('gap-on');
+      await sleep((performance.now() - t0) * gap + 300);
+      document.body.classList.remove('gap-on');
+    }
+    if (my !== token) return;
+    if (!$('#loop').checked) cur++;
+  }
+  if (my === token) { if (cur >= sentences.length) cur = 0; stop(); mark(); }
+}
+function stop() {
+  token++; playing = false; synth?.cancel();
+  document.body.classList.remove('gap-on'); $('#play').textContent = '▶ 播放';
+}
+function jump(i) {
+  if (!sentences.length) return;
+  const was = playing; stop();
+  cur = Math.max(0, Math.min(sentences.length - 1, i)); mark(true);
+  if (was) run();
+}
+
+$('#load').onclick = load;
+$('#play').onclick = () => (playing ? stop() : sentences.length && run());
+$('#prev').onclick = () => jump(cur - 1);
+$('#next').onclick = () => jump(cur + 1);
+$('#reader').addEventListener('click', (e) => {
+  const s = e.target.closest('.s'); if (!s || e.detail > 1) return;
+  stop(); cur = +s.dataset.i; run();
+});
+$('#reader').addEventListener('keydown', (e) => {
+  const s = e.target.closest('.s'); if (!s || (e.key !== 'Enter' && e.key !== ' ')) return;
+  e.preventDefault(); stop(); cur = +s.dataset.i; run();
+});
+$('#reader').addEventListener('dblclick', (e) => {
+  if (!e.target.classList.contains('w')) return;
+  stop();
+  const w = e.target.textContent;
+  say(w, 0.75);
+});
+let recorder = null;
+$('#rec').onclick = async () => {
+  const b = $('#rec');
+  if (recorder?.state === 'recording') { recorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks = []; recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => chunks.push(e.data);
+    recorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());
+      const m = $('#mine'); m.src = URL.createObjectURL(new Blob(chunks, { type: recorder.mimeType }));
+      m.hidden = false; b.textContent = '🎙 录我的跟读';
+    };
+    recorder.start(); b.textContent = '⏹ 停止录音';
+  } catch { setHint('无法使用麦克风：请在浏览器地址栏允许麦克风权限。', true); }
+};
+load();
+</script>
+</body>
+</html>
