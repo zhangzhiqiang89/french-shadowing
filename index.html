@@ -64,6 +64,7 @@ Le matin, je prends un café en terrasse avant d'aller au travail. Le week-end, 
   <div class="row">
     <button class="primary" id="load">载入文本</button>
     <label>语音 <select id="voice"></select></label>
+    <button id="test">🔊 测试声音</button>
   </div>
   <div class="row">
     <label>语速 <select id="rate"><option>0.6</option><option>0.75</option><option selected>0.9</option><option>1</option><option>1.2</option></select></label>
@@ -102,10 +103,13 @@ function rank(v) {
   if (/google|online/i.test(id)) return 1;
   return 2;
 }
+let voiceCount = -1;
 function loadVoices() {
   if (!synth) { setHint('这个浏览器不支持语音朗读，请用 Chrome 或 Safari 打开。', true); return; }
   voices = synth.getVoices().filter((v) => /^fr/i.test(v.lang))
     .sort((a, b) => rank(a) - rank(b) || a.lang.localeCompare(b.lang));
+  if (voices.length === voiceCount) return;   // 列表没变，不覆盖当前提示
+  voiceCount = voices.length;
   const sel = $('#voice'), saved = store.get('voice');
   sel.innerHTML = '';
   voices.forEach((v, i) => {
@@ -123,17 +127,43 @@ if (synth) { synth.onvoiceschanged = loadVoices; }
 loadVoices(); setTimeout(loadVoices, 800);
 $('#voice').onchange = () => store.set('voice', voices[$('#voice').value]?.name);
 
+// iPhone：网页朗读默认受静音开关影响。把音频会话切到「播放」并在用户点击时播一段静音，
+// 让朗读在静音模式下也能出声。
+let unlocked = false;
+function silentWav() {
+  const n = 800, b = new ArrayBuffer(44 + n * 2), d = new DataView(b);
+  const w = (o, t) => [...t].forEach((c, i) => d.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); d.setUint32(4, 36 + n * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  d.setUint32(16, 16, true); d.setUint16(20, 1, true); d.setUint16(22, 1, true);
+  d.setUint32(24, 8000, true); d.setUint32(28, 16000, true); d.setUint16(32, 2, true); d.setUint16(34, 16, true);
+  w(36, 'data'); d.setUint32(40, n * 2, true);
+  return URL.createObjectURL(new Blob([b], { type: 'audio/wav' }));
+}
+function setSession(type) { try { if (navigator.audioSession) navigator.audioSession.type = type; } catch {} }
+function unlock() {
+  if (unlocked) return;
+  unlocked = true;
+  setSession('playback');
+  try { new Audio(silentWav()).play().catch(() => {}); } catch {}
+}
+
+// 返回 true 表示确实朗读了；4 秒内没开始朗读则返回 false
 function say(text, rate = +$('#rate').value) {
   return new Promise((resolve) => {
-    if (!synth) return resolve();
+    if (!synth) return resolve(false);
     utt = new SpeechSynthesisUtterance(text);   // 保留引用，避免 Chrome 丢失结束回调
     const v = voices[$('#voice').value];
     if (v) utt.voice = v;
     utt.lang = v?.lang || 'fr-FR'; utt.rate = rate;
-    utt.onend = utt.onerror = () => resolve();
+    let started = false;
+    const timer = setTimeout(() => { if (!started) { synth.cancel(); resolve(false); } }, 4000);
+    utt.onstart = () => { started = true; };
+    utt.onend = utt.onerror = () => { clearTimeout(timer); resolve(started); };
+    synth.resume();   // iOS 偶尔卡在暂停状态
     synth.speak(utt);
   });
 }
+const NO_SOUND = '浏览器没有开始朗读。iPhone 请检查：① 侧面静音开关关闭；② 音量调大；③ 换一个「语音」再点「🔊 测试声音」；④ 设置 → 辅助功能 → 朗读内容 里确认已下载法语声音。';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function load() {
@@ -166,8 +196,9 @@ async function run() {
   while (my === token && cur < sentences.length) {
     mark(true);
     const t0 = performance.now();
-    await say(sentences[cur]);
+    const ok = await say(sentences[cur]);
     if (my !== token) return;
+    if (!ok) { stop(); setHint(NO_SOUND, true); return; }
     const gap = +$('#gap').value;
     if (gap) {
       document.body.classList.add('gap-on');
@@ -180,7 +211,8 @@ async function run() {
   if (my === token) { if (cur >= sentences.length) cur = 0; stop(); mark(); }
 }
 function stop() {
-  token++; playing = false; synth?.cancel();
+  token++; playing = false;
+  if (synth && (synth.speaking || synth.pending)) synth.cancel();
   document.body.classList.remove('gap-on'); $('#play').textContent = '▶ 播放';
 }
 function jump(i) {
@@ -191,20 +223,26 @@ function jump(i) {
 }
 
 $('#load').onclick = load;
-$('#play').onclick = () => (playing ? stop() : sentences.length && run());
+$('#play').onclick = () => { unlock(); playing ? stop() : sentences.length && run(); };
+$('#test').onclick = async () => {
+  unlock(); stop();
+  setHint('正在测试……');
+  const ok = await say('Bonjour, ceci est un test.');
+  setHint(ok ? '朗读已开始。如果还是听不到，请关闭静音开关并调大音量。' : NO_SOUND, !ok);
+};
 $('#prev').onclick = () => jump(cur - 1);
 $('#next').onclick = () => jump(cur + 1);
 $('#reader').addEventListener('click', (e) => {
   const s = e.target.closest('.s'); if (!s || e.detail > 1) return;
-  stop(); cur = +s.dataset.i; run();
+  unlock(); stop(); cur = +s.dataset.i; run();
 });
 $('#reader').addEventListener('keydown', (e) => {
   const s = e.target.closest('.s'); if (!s || (e.key !== 'Enter' && e.key !== ' ')) return;
-  e.preventDefault(); stop(); cur = +s.dataset.i; run();
+  e.preventDefault(); unlock(); stop(); cur = +s.dataset.i; run();
 });
 $('#reader').addEventListener('dblclick', (e) => {
   if (!e.target.classList.contains('w')) return;
-  stop();
+  unlock(); stop();
   const w = e.target.textContent;
   say(w, 0.75);
 });
@@ -213,11 +251,12 @@ $('#rec').onclick = async () => {
   const b = $('#rec');
   if (recorder?.state === 'recording') { recorder.stop(); return; }
   try {
+    setSession('play-and-record');
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     const chunks = []; recorder = new MediaRecorder(stream);
     recorder.ondataavailable = (e) => chunks.push(e.data);
     recorder.onstop = () => {
-      stream.getTracks().forEach((t) => t.stop());
+      stream.getTracks().forEach((t) => t.stop()); setSession('playback');
       const m = $('#mine'); m.src = URL.createObjectURL(new Blob(chunks, { type: recorder.mimeType }));
       m.hidden = false; b.textContent = '🎙 录我的跟读';
     };
